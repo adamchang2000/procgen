@@ -2,9 +2,12 @@
 #include "../assetgen.h"
 #include <set>
 #include <queue>
+#include <cmath>
+#include <algorithm>
 
 const std::string NAME = "fruitbot";
 
+//GLOBAL REWARD VALUES
 const float COMPLETION_BONUS = 10.0;
 const int POSITIVE_REWARD = 1.0f;
 const int PENALTY = -4.0f;
@@ -21,6 +24,11 @@ const int PRESENT = 12;
 const int KEY_DURATION = 8;
 
 const float DOOR_ASPECT_RATIO = 3.25;
+
+//sorting entities by x value
+bool sort_function(std::shared_ptr<Entity> ent1, std::shared_ptr<Entity> ent2) {
+    return ent1->x < ent2->x;
+}
 
 class FruitBotGame : public BasicAbstractGame {
   public:
@@ -249,8 +257,91 @@ class FruitBotGame : public BasicAbstractGame {
         agent->rotation = -1 * PI / 2;
     }
 
+    
+
     void game_step() override {
         BasicAbstractGame::game_step();
+
+        /*
+        Updating reward based on custom metrics
+        Metrics are:
+        1. Distance to nearest fruit, reward for fruits before next gap decreases as agent approaches gap
+        2. Distance difference between horizontal and vertical to next gap
+        3. Distance to nearest non-fruit
+        */
+
+        //negative means decreases reward
+        //positive means increases reward
+
+        const float NEAREST_FRUIT_MULT = 0.1;
+        const float DIFF_HOR_VERT_GAP_MULT = -0.1; //if horizontal gap bigger than vertical gap, this is bad
+        const float NEAREST_NONFRUIT_MULT = -0.1; 
+
+        std::vector<std::shared_ptr<Entity>> fruits;
+        std::vector<std::shared_ptr<Entity>> walls;
+        std::vector<std::shared_ptr<Entity>> nonfruits;
+
+        std::shared_ptr<Entity> agent;
+
+        for (auto ent : entities) {
+            if (ent->type == 7) {
+                fruits.push_back(ent);
+            } else if (ent->type == 4) {
+                nonfruits.push_back(ent);
+            } else if (ent->type == 1) {
+                walls.push_back(ent);
+            } else if (ent->type == 0) {
+                agent = ent;
+            }
+        }
+
+        float dist_to_wall = -1; //vertical dist to next wall section
+        float dist_to_gap = -1; //horizontal dist to next gap
+
+        float lowest_wall_y = 100000; //find lowest wall higher than agent(min y)
+
+        printf("agent position %f %f\n", agent->x, agent->y);
+        printf("agent velocity %f %f\n", agent->vx, agent->vy);
+
+        for (auto ent: walls) {
+            if (ent->y > agent->y && ent->y < lowest_wall_y) {
+                lowest_wall_y = ent->y;
+            }
+
+        }
+
+        std::vector<std::shared_ptr<Entity>> lowest_walls;
+        for (auto ent: walls) {
+            if (ent->y == lowest_wall_y) {
+                lowest_walls.push_back(ent);
+            }
+        }
+
+        std::sort(lowest_walls.begin(), lowest_walls.end(), sort_function);
+
+        printf("lowest x, y wall %f %f\n", lowest_walls[0]->x, lowest_walls[0]->y);
+
+        printf("lowest walls size %d\n", lowest_walls.size());
+
+        float nearest_dist_fruit = 1000000;
+
+        for (auto ent: fruits) {
+            float dist = std::pow(std::pow(agent->x - ent->x, 2) + std::pow(agent->y - ent->y, 2), 0.5);
+            nearest_dist_fruit = std::min(nearest_dist_fruit, dist);
+        }
+
+        printf("nearest dist fruit = %f\n", nearest_dist_fruit);
+
+        step_data.reward += NEAREST_FRUIT_MULT * nearest_dist_fruit;
+
+        float nearest_dist_nonfruit = 1000000;
+
+        for (auto ent: nonfruits) {
+            float dist = std::pow(std::pow(agent->x - ent->x, 2) + std::pow(agent->y - ent->y, 2), 0.5);
+            nearest_dist_nonfruit = std::min(nearest_dist_nonfruit, dist);
+        }
+
+        step_data.reward += NEAREST_NONFRUIT_MULT * nearest_dist_nonfruit;
 
         if (special_action == 1 && (cur_time - last_fire_time) >= KEY_DURATION) {
             float vx = 0;
