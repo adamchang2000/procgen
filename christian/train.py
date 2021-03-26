@@ -1,4 +1,5 @@
 import os
+import argparse
 
 import gym
 import numpy as np
@@ -80,74 +81,76 @@ class SaveOnBestTrainingRewardCallback(BaseCallback):
         return True
     
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", "--model", help="PPO, DQN, HER, or A2C")
+    args = parser.parse_args()
+    
+    if args.model.lower() not in ['ppo', 'dqn', 'her', 'a2c']:
+        assert False, "[ERROR] Invalid model specified"
+    
     # Create log dir
-    log_dir = "tmp_mp_dqn/"
+    model = args.model.lower()
+    log_dir = f"logs/tmp_mp_{model}/"
     os.makedirs(log_dir, exist_ok=True)
-    num_cpu = 12
 
+    # Setting up environment
     param = {
         'num_levels': 100, 
         'distribution_mode': 'easy', 
         'render': False
     }
     env_id = "procgen:procgen-fruitbot-v0"
-    
-    # For Vectorized Processes
-    # env = SubprocVecEnv(
-    # [make_env(env_id, i) for i in range(num_cpu)])
-    # env = make_vec_env(env_id, 
-    #                    n_envs=num_cpu, 
-    #                    monitor_dir=log_dir,
-    #                    env_kwargs=param)
-    
-    # For Non-Vectorized Processes
-    env = gym.make(env_id, **param)
-    env = Monitor(env, log_dir)
+    if model in ['ppo', 'a2c']:
+        # For Vectorized Processes
+        num_cpu = 12
+        env = make_vec_env(env_id, 
+                           n_envs=num_cpu, 
+                           monitor_dir=log_dir,
+                           env_kwargs=param)
+    else:
+        # For Non-Vectorized Processes
+        env = gym.make(env_id, **param)
+        env = Monitor(env, log_dir)
 
     # PPO
-    # model = PPO("CnnPolicy", env, verbose=1)
+    if model == 'ppo':
+        model = PPO("CnnPolicy", env, verbose=1)
     
     # HER
-    """
-    n_sampled_goal = 4
-    model = HER(
-        "CnnPolicy",
-        env,
-        DQN,
-        n_sampled_goal=n_sampled_goal,
-        goal_selection_strategy="future",
-        
-        # IMPORTANT: because the env is not wrapped with a 
-        #            TimeLimit wrapper
-        # we have to manually specify the max number of 
-        # steps per episode
-        
-        max_episode_length=100,
-        verbose=1,
-        buffer_size=int(1e6),
-        learning_rate=1e-3,
-        gamma=0.95,
-        batch_size=256,
-        online_sampling=True,
-        policy_kwargs=dict(net_arch=[256, 256, 256]),
-    )
-    """
+    elif model == 'her':
+        n_sampled_goal = 4
+        model = HER(
+            "CnnPolicy",
+            env,
+            DQN,
+            n_sampled_goal=n_sampled_goal,
+            goal_selection_strategy="future",
+
+            # IMPORTANT: because the env is not wrapped with a 
+            #            TimeLimit wrapper
+            # we have to manually specify the max number of 
+            # steps per episode
+
+            max_episode_length=100,
+            verbose=1,
+            buffer_size=int(1e6),
+            learning_rate=1e-3,
+            gamma=0.95,
+            batch_size=256,
+            online_sampling=True,
+            policy_kwargs=dict(net_arch=[256, 256, 256]),
+        )
     
     # DQN
-    model = DQN("CnnPolicy", env, verbose=1)
+    elif model == 'dqn':
+        model = DQN("CnnPolicy", env, verbose=1)
+        
+    # A2C
+    else:
+        model = A2C("CnnPolicy", env, verbose=1)
     
     callback = SaveOnBestTrainingRewardCallback(
         check_freq=1000, log_dir=log_dir)
     timesteps = 1e6 * 5
     model.learn(total_timesteps=timesteps, 
                 callback=callback)
-
-    # obs = env.reset()
-    # for _ in range(timesteps):
-    #     action, _states = model.predict(obs)
-    #     obs, rewards, done, info = env.step(action)
-    #     env.render(mode='rgb_array')
-    
-    # plot_results([log_dir], timesteps, 
-    # results_plotter.X_TIMESTEPS, "PPO Fruitbot")
-    # plt.show()
