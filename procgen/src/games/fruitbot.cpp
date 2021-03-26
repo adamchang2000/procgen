@@ -8,9 +8,9 @@
 const std::string NAME = "fruitbot";
 
 //GLOBAL REWARD VALUES
-const float COMPLETION_BONUS = 10.0;
-const int POSITIVE_REWARD = 1.0f;
-const int PENALTY = -4.0f;
+const float COMPLETION_BONUS = 20.0;
+const int POSITIVE_REWARD = 5.0f;
+const int PENALTY = -8.0f;
 
 const int BARRIER = 1;
 const int OUT_OF_BOUNDS_WALL = 2;
@@ -274,8 +274,8 @@ class FruitBotGame : public BasicAbstractGame {
         //positive means increases reward
 
         const float NEAREST_FRUIT_MULT = 0.1;
-        const float DIFF_HOR_VERT_GAP_MULT = -0.1; //if horizontal gap bigger than vertical gap, this is bad
-        const float NEAREST_NONFRUIT_MULT = -0.1; 
+        const float DIFF_HOR_VERT_GAP_MULT = -0.05; //if horizontal gap bigger than vertical gap, this is bad
+        const float NEAREST_NONFRUIT_MULT = -0.05; 
 
         std::vector<std::shared_ptr<Entity>> fruits;
         std::vector<std::shared_ptr<Entity>> walls;
@@ -300,9 +300,6 @@ class FruitBotGame : public BasicAbstractGame {
 
         float lowest_wall_y = 100000; //find lowest wall higher than agent(min y)
 
-        printf("agent position %f %f\n", agent->x, agent->y);
-        printf("agent velocity %f %f\n", agent->vx, agent->vy);
-
         for (auto ent: walls) {
             if (ent->y > agent->y && ent->y < lowest_wall_y) {
                 lowest_wall_y = ent->y;
@@ -319,9 +316,13 @@ class FruitBotGame : public BasicAbstractGame {
 
         std::sort(lowest_walls.begin(), lowest_walls.end(), sort_function);
 
-        printf("lowest x, y wall %f %f\n", lowest_walls[0]->x, lowest_walls[0]->y);
+        float gap_left = lowest_walls[0]->x + lowest_walls[0]->rx;
+        float gap_right = lowest_walls[1]->x - lowest_walls[1]->rx;
 
-        printf("lowest walls size %d\n", lowest_walls.size());
+        dist_to_gap = std::min(std::abs(gap_left - agent->x), std::abs(gap_right - agent->x));
+        dist_to_wall = lowest_wall_y - agent->y;
+
+        step_data.reward += DIFF_HOR_VERT_GAP_MULT * (dist_to_gap - dist_to_wall);
 
         float nearest_dist_fruit = 1000000;
 
@@ -330,9 +331,7 @@ class FruitBotGame : public BasicAbstractGame {
             nearest_dist_fruit = std::min(nearest_dist_fruit, dist);
         }
 
-        printf("nearest dist fruit = %f\n", nearest_dist_fruit);
-
-        step_data.reward += NEAREST_FRUIT_MULT * nearest_dist_fruit;
+        step_data.reward += NEAREST_FRUIT_MULT * nearest_dist_fruit * (dist_to_wall / 10); //also scale this proportional to gap to next wall
 
         float nearest_dist_nonfruit = 1000000;
 
@@ -341,7 +340,7 @@ class FruitBotGame : public BasicAbstractGame {
             nearest_dist_nonfruit = std::min(nearest_dist_nonfruit, dist);
         }
 
-        step_data.reward += NEAREST_NONFRUIT_MULT * nearest_dist_nonfruit;
+        step_data.reward += NEAREST_NONFRUIT_MULT * nearest_dist_nonfruit * (dist_to_wall / 10); //also scale this proportional to gap to next wall
 
         if (special_action == 1 && (cur_time - last_fire_time) >= KEY_DURATION) {
             float vx = 0;
