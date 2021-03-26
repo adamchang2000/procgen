@@ -313,34 +313,36 @@ class FruitBotGame : public BasicAbstractGame {
                 lowest_walls.push_back(ent);
             }
         }
+        
+        if (lowest_walls.size() > 0) {
+            std::sort(lowest_walls.begin(), lowest_walls.end(), sort_function);
 
-        std::sort(lowest_walls.begin(), lowest_walls.end(), sort_function);
+            float gap_left = lowest_walls[0]->x + lowest_walls[0]->rx;
+            float gap_right = lowest_walls[1]->x - lowest_walls[1]->rx;
 
-        float gap_left = lowest_walls[0]->x + lowest_walls[0]->rx;
-        float gap_right = lowest_walls[1]->x - lowest_walls[1]->rx;
+            dist_to_gap = std::min(std::abs(gap_left - agent->x), std::abs(gap_right - agent->x));
+            dist_to_wall = lowest_wall_y - agent->y;
+            
+            step_data.reward += DIFF_HOR_VERT_GAP_MULT * (dist_to_gap - dist_to_wall);
 
-        dist_to_gap = std::min(std::abs(gap_left - agent->x), std::abs(gap_right - agent->x));
-        dist_to_wall = lowest_wall_y - agent->y;
+            float nearest_dist_fruit = 1000000;
 
-        step_data.reward += DIFF_HOR_VERT_GAP_MULT * (dist_to_gap - dist_to_wall);
+            for (auto ent: fruits) {
+                float dist = std::pow(std::pow(agent->x - ent->x, 2) + std::pow(agent->y - ent->y, 2), 0.5);
+                nearest_dist_fruit = std::min(nearest_dist_fruit, dist);
+            }
 
-        float nearest_dist_fruit = 1000000;
+            step_data.reward += NEAREST_FRUIT_MULT * nearest_dist_fruit * (dist_to_wall / 10); //also scale this proportional to gap to next wall
 
-        for (auto ent: fruits) {
-            float dist = std::pow(std::pow(agent->x - ent->x, 2) + std::pow(agent->y - ent->y, 2), 0.5);
-            nearest_dist_fruit = std::min(nearest_dist_fruit, dist);
+            float nearest_dist_nonfruit = 1000000;
+
+            for (auto ent: nonfruits) {
+                float dist = std::pow(std::pow(agent->x - ent->x, 2) + std::pow(agent->y - ent->y, 2), 0.5);
+                nearest_dist_nonfruit = std::min(nearest_dist_nonfruit, dist);
+            }
+
+            step_data.reward += NEAREST_NONFRUIT_MULT * nearest_dist_nonfruit * (dist_to_wall / 10); //also scale this proportional to gap to next wall
         }
-
-        step_data.reward += NEAREST_FRUIT_MULT * nearest_dist_fruit * (dist_to_wall / 10); //also scale this proportional to gap to next wall
-
-        float nearest_dist_nonfruit = 1000000;
-
-        for (auto ent: nonfruits) {
-            float dist = std::pow(std::pow(agent->x - ent->x, 2) + std::pow(agent->y - ent->y, 2), 0.5);
-            nearest_dist_nonfruit = std::min(nearest_dist_nonfruit, dist);
-        }
-
-        step_data.reward += NEAREST_NONFRUIT_MULT * nearest_dist_nonfruit * (dist_to_wall / 10); //also scale this proportional to gap to next wall
 
         if (special_action == 1 && (cur_time - last_fire_time) >= KEY_DURATION) {
             float vx = 0;
