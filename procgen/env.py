@@ -20,6 +20,7 @@ ENV_NAMES = [
     "coinrun",
     "dodgeball",
     "fruitbot",
+    "fruitbotnew",
     "heist",
     "jumper",
     "leaper",

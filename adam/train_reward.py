@@ -6,7 +6,7 @@ RENDER = True
 
 def main():
     if RENDER:
-        env = ProcgenGym3Env(num=2, env_name="fruitbot", render_mode="rgb_array")
+        env = ProcgenGym3Env(num=2, env_name="fruitbotnew", render_mode="rgb_array")
         env = gym3.ViewerWrapper(env, info_key="rgb")
     else:
         env = ProcgenGym3Env(num=2, env_name="fruitbot")
