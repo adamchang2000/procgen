@@ -110,3 +110,4 @@ venv.bak/
 *.zip
 *.pth
 *.ipynb_checkpoint*
+*.csv
