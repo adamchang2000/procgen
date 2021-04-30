@@ -105,3 +105,8 @@ venv.bak/
 
 .envrc
 .build/
+*__pycache__*
+*.pt
+*.zip
+*.pth
+*.ipynb_checkpoint*
