@@ -712,9 +712,9 @@ class PPO(agent.AttributeSavingMixin, agent.BatchAgent):
                     self.model, b_state, self.train_prev_recurrent_states
                 )
             else:
-                print("b_state:", b_state.shape)
+                # print("b_state:", b_state.shape)
                 action_distrib, batch_value = self.model(b_state)
-                print("batch_value_shape", batch_value.shape)
+                # print("batch_value_shape", batch_value.shape)
             batch_action = action_distrib.sample().cpu().numpy()
             self.entropy_record.extend(action_distrib.entropy().cpu().numpy())
             self.value_record.extend(batch_value.cpu().numpy())
