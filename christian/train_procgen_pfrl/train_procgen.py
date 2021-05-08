@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument('--max-steps', type=int, default=25_000_000)
     parser.add_argument('--save-interval', type=int, default=100)
 
+    # Other parameters
+    parser.add_argument('--nobg', type=lambda x : x.lower() != 'false', default=True)
+
     return parser.parse_args()
 
 
@@ -59,6 +62,7 @@ def create_venv(config, is_valid=False):
         start_level=0 if is_valid else config.start_level,
         distribution_mode=config.distribution_mode,
         num_threads=config.num_threads,
+        use_backgrounds=not config.nobg
     )
     venv = VecExtractDictObs(venv, "rgb")
     venv = VecMonitor(venv=venv, filename=None, keep_buf=100)
@@ -71,7 +75,7 @@ def safe_mean(xs):
 
 def rollout_one_step(agent, env, obs, steps, env_max_steps=1000):
 
-    print("rollout_obs:", obs.shape)
+    # print("rollout_obs:", obs.shape)
 
     # Step once.
     action = agent.batch_act(obs)

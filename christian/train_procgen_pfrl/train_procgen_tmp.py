@@ -11,7 +11,7 @@ from vec_env import VecMonitor
 from vec_env import VecNormalize
 from util import logger
 
-from policies import ImpalaCNN, TMPNet
+from policies import ImpalaCNN, TMPNet, TMPNet2, TMPNet3
 from ppo import PPO
 
 
@@ -48,6 +48,14 @@ def parse_args():
     parser.add_argument('--max-steps', type=int, default=25_000_000)
     parser.add_argument('--save-interval', type=int, default=100)
 
+    # TMP parameters.
+    parser.add_argument('--TMPv', type=str, default='v1', 
+                        choices=['v1', 'v2', 'v3'])
+    parser.add_argument('--grad', type=lambda x : bool(x), default=False)
+    parser.add_argument('--proc_size', type=int, default=3)
+    parser.add_argument('--proc_strd', type=int, default=2)
+    parser.add_argument('--nobg', type=lambda x : x.lower() == 'false', default=False)
+
     return parser.parse_args()
 
 
@@ -59,6 +67,7 @@ def create_venv(config, is_valid=False):
         start_level=0 if is_valid else config.start_level,
         distribution_mode=config.distribution_mode,
         num_threads=config.num_threads,
+        use_backgrounds=not config.nobg
     )
     venv = VecExtractDictObs(venv, "rgb")
     venv = VecMonitor(venv=venv, filename=None, keep_buf=100)
@@ -206,9 +215,20 @@ def run():
     valid_venv = create_venv(configs, is_valid=True)
 
     # Create policy.
-    policy = TMPNet(
+    tmpnet = TMPNet
+    if configs.TMPv == 'v2':
+        tmpnet = TMPNet2
+    if configs.TMPv == 'v3':
+        tmpnet = TMPNet3
+
+    print("[TMP] Grad On?", configs.grad)
+
+    policy = tmpnet(
         obs_space=train_venv.observation_space,
         num_outputs=train_venv.action_space.n,
+        proc_conv_ksize=configs.proc_size,
+        proc_conv_stride=configs.proc_strd,
+        grad_on=configs.grad
     )
 
     # Create agent and train.

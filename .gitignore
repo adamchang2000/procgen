@@ -111,3 +111,4 @@ venv.bak/
 *.pth
 *.ipynb_checkpoint*
 *.csv
+*event*

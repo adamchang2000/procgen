@@ -34,6 +34,7 @@ def train_loop(
     episodes_counter,
     stop_event,
     exception_event,
+    logdir, # EDIT: Used for logging output 
     max_episode_len=None,
     evaluator=None,
     eval_env=None,
@@ -64,6 +65,8 @@ def train_loop(
         episode_len = 0
         successful = False
 
+        tstart = time.perf_counter() # EDIT: Start timer
+
         while True:
 
             # print("Train Loop Obs Shape:", obs.shape)
@@ -79,7 +82,7 @@ def train_loop(
             local_t += 1
             episode_r += r
             episode_len += 1
-            reset = episode_len == max_episode_len or info.get("needs_reset", False)
+            reset = info.get("needs_reset", False)
 
             # print("Observe Obs Shape:", obs.shape)
 
@@ -103,13 +106,53 @@ def train_loop(
                         episode_r,
                     )
                     print(
-                      f"outdir:{outdir} " +\
-                      f"global_step:{global_t} " +\
-                      f"local_step:{local_t} " +\
+                      f"pid:{process_idx} " + \
+                      f"outdir:{outdir} " + \
+                      f"global_step:{global_t} " + \
+                      f"local_step:{local_t} " + \
                       f"R:{episode_r}"
                     )
                     logger.info("statistics:%s", agent.get_statistics())
                     print(f"Statistics: {agent.get_statistics()}")
+
+                    step_cnt = local_t
+                    if (step_cnt + 1) % config.nsteps == 0:
+                        tnow = time.perf_counter()
+                        fps = int(nbatch / (tnow - tstart))
+
+                        logger.logkv('steps', step_cnt + 1)
+                        
+                        logger.logkv('total_steps', (step_cnt + 1) * config.num_envs)
+                        
+                        logger.logkv('fps', fps)
+                        
+                        logger.logkv('num_ppo_update', num_a3c_updates)
+                        
+                        logger.logkv('eprewmean',
+                                    safe_mean([info['r'] for info in train_epinfo_buf]))
+                        
+                        logger.logkv('eplenmean',
+                                    safe_mean([info['l'] for info in train_epinfo_buf]))
+                        
+                        logger.logkv('eval_eprewmean',
+                                    safe_mean([info['r'] for info in test_epinfo_buf]))
+                        
+                        logger.logkv('eval_eplenmean',
+                                    safe_mean([info['l'] for info in test_epinfo_buf]))
+                        
+                        train_stats = agent.get_statistics()
+                        for stats in train_stats:
+                            logger.logkv(stats[0], stats[1])
+                        logger.dumpkvs()
+
+                        if num_ppo_updates % config.save_interval == 0:
+                            model_dir = logdir
+                            model_path = os.path.join(
+                                model_dir, 'model_{}.pt'.format(num_a3c_updates + 1))
+                            agent.model.save_to_file(model_path)
+                            logger.info('Model save to {}'.format(model_path))
+
+                        tstart = time.perf_counter()
 
                 # Evaluate the current agent
                 if evaluator is not None:
@@ -164,6 +207,7 @@ def train_loop(
 
 def train_agent_async(
     outdir,
+    logdir,
     processes,
     make_env,
     profile=False,
@@ -310,6 +354,7 @@ def train_agent_async(
                 eval_env=eval_env,
                 global_step_hooks=global_step_hooks,
                 logger=logger,
+                logdir=logdir
             )
 
         if profile:

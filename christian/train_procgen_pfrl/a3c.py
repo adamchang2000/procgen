@@ -102,6 +102,9 @@ class A3C(agent.AttributeSavingMixin, agent.AsyncAgent):
         self.train_recurrent_states = None
         self.test_recurrent_states = None
 
+        # Logger Variables
+        self.n_updates = 0
+
         # Stats
         self.average_value = 0
         self.average_entropy = 0
@@ -235,6 +238,7 @@ class A3C(agent.AttributeSavingMixin, agent.AsyncAgent):
         self.optimizer.step()
         if self.process_idx == 0:
             logger.debug("update")
+            self.n_updates += 1
 
         self.sync_parameters()
 

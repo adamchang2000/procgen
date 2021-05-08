@@ -334,13 +334,17 @@ class PPO(agent.AttributeSavingMixin, agent.BatchAgent):
         self.optimizer = optimizer
         self.obs_normalizer = obs_normalizer
 
-        if gpu is not None and gpu >= 0:
-            assert torch.cuda.is_available()
+        if gpu is not None and gpu >= 0 and torch.cuda.is_available():
+            # assert torch.cuda.is_available()
+            print('Using gpu...')
             self.device = torch.device("cuda:{}".format(gpu))
             self.model.to(self.device)
             if self.obs_normalizer is not None:
                 self.obs_normalizer.to(self.device)
         else:
+            if torch.cuda.is_available():
+                print('Considering using GPU b/c it is availabe!')
+            print('Using cpu...')
             self.device = torch.device("cpu")
 
         self.gamma = gamma
