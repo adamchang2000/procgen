@@ -79,10 +79,18 @@ def parse_args():
     parser.add_argument('--distill', type=get_bool, default=False)
     parser.add_argument('--distill-T', type=float, default=0.5)
     parser.add_argument('--distill-alpha', type=float, default=0.5)
+    parser.add_argument('--distill-asched', type=float, default=-1)
     parser.add_argument('--distill-cl-func', type=str, choices=[
         'None', 'MSELoss'
     ])
     parser.add_argument('--teacher-model', type=str, default='')
+    parser.add_argument('--max-layers', type=int, default=3)
+    parser.add_argument('--corrs', type=lambda x: x.split(','), default=[])
+    parser.add_argument('--distill-gray', type=get_bool, default=False)
+    parser.add_argument('--out-scale', type=float, default=1.0)
+    parser.add_argument('--reduction', type=str, choices=[
+        'mean', 'batchmean'
+    ])
 
     return parser.parse_args()
 
@@ -195,25 +203,28 @@ def train(config, agent, train_env, test_env, model_dir):
 
         assert agent.training
         num_ppo_updates = agent.n_updates // n_ops_per_update
+        
+        if config.distill:
+            agent.model.update_alpha((step_cnt + 1) * config.num_envs)
 
         if (step_cnt + 1) % config.nsteps == 0:
             tnow = time.perf_counter()
             fps = int(nbatch / (tnow - tstart))
 
             with train_summary_writer.as_default():
-              tf.summary.scalar('eprewmean', safe_mean([info['r'] for info in train_epinfo_buf]), step=step_cnt+1)
-              tf.summary.scalar('eplenmean', safe_mean([info['l'] for info in train_epinfo_buf]), step=step_cnt+1)
-              tf.summary.scalar('total_steps', (step_cnt + 1) * config.num_envs, step=step_cnt+1)
-              tf.summary.scalar('fps', fps, step=step_cnt+1)
-              tf.summary.scalar('num_ppo_updates', num_ppo_updates, step=step_cnt+1)
-              train_stats = agent.get_statistics()
-              for stats in train_stats:
-                logger.logkv(stats[0], stats[1])
-                tf.summary.scalar(stats[0], stats[1], step=step_cnt+1)
+                tf.summary.scalar('eprewmean', safe_mean([info['r'] for info in train_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('eplenmean', safe_mean([info['l'] for info in train_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('total_steps', (step_cnt + 1) * config.num_envs, step=step_cnt+1)
+                tf.summary.scalar('fps', fps, step=step_cnt+1)
+                tf.summary.scalar('num_ppo_updates', num_ppo_updates, step=step_cnt+1)
+                train_stats = agent.get_statistics()
+                for stats in train_stats:
+                    logger.logkv(stats[0], stats[1])
+                    tf.summary.scalar(stats[0], stats[1], step=step_cnt+1)
 
             with test_summary_writer.as_default():
-              tf.summary.scalar('eval_eprewmean', safe_mean([info['r'] for info in test_epinfo_buf]), step=step_cnt+1)
-              tf.summary.scalar('eval_eplenmean', safe_mean([info['l'] for info in test_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('eval_eprewmean', safe_mean([info['r'] for info in test_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('eval_eplenmean', safe_mean([info['l'] for info in test_epinfo_buf]), step=step_cnt+1)
             
             logger.logkv('steps', step_cnt + 1)
             logger.logkv('total_steps', (step_cnt + 1) * config.num_envs)
@@ -258,6 +269,7 @@ def run():
         configs.exp_name,
     )
 
+    print()
     print('configuring logger at dir', log_dir)
     print('No background?', configs.nobg)
     print('LR?', configs.lr)
@@ -267,12 +279,19 @@ def run():
         print('Alpha?', configs.distill_alpha)
         print('Corresponedence Loss Func?', configs.distill_cl_func)
         print('Teacher Model Path?', configs.teacher_model)
+        print('Correspondences?', configs.corrs)
+        print('Max Layers?', configs.max_layers)
+        print('Distill Gray?', configs.distill_gray)
+        print('Output Channel Scale?', configs.out_scale)
+        print('Reduction?', configs.reduction)
+        print('Alpha Scheduler?', configs.distill_asched)
     else:
         print('Using template initialization...')
         print('TMPNet version?', configs.TMPv)
         print('Grad?', configs.grad)
         print('Impl K Size?', configs.impl_k_size)
         print('Temp K Size?', configs.temp_size)
+    print()
 
     logger.configure(dir=log_dir, format_strs=['csv', 'stdout'])
 
@@ -299,27 +318,32 @@ def run():
             mid_feats=256, 
             T=configs.distill_T, 
             alpha=configs.distill_alpha,
-            cl_func=cl_func
+            max_layers=configs.max_layers,
+            cl_func=cl_func,
+            gray=configs.distill_gray,
+            out_scale=configs.out_scale,
+            kl_reduction=configs.reduction,
+            alpha_sched=configs.distill_asched
         )
         
         policy = ImpalaCNN(
             obs_space=train_venv.observation_space,
             num_outputs=train_venv.action_space.n,
-            distill_net=distill_net
+            corrs=configs.corrs,
+            distill_net=distill_net,
+            distill_gray=configs.distill_gray
         )
         assert configs.teacher_model != '', 'Empty teacher path...'
         assert os.path.isfile(configs.teacher_model), 'No pt file found...'
         
-        try:
-            policy.load_from_file(configs.teacher_model)
-        except:
-            dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-            state_dict = torch.load(
-                configs.teacher_model,
-                map_location=torch.device(dev)
-            )
-            policy.load_state_dict(state_dict)
-        
+        dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+        state_dict = torch.load(
+            configs.teacher_model,
+            map_location=torch.device(dev)
+        )
+        policy.load_state_dict(state_dict)
+        policy = policy.to(torch.device(dev))
+        distill_net = distill_net.to(torch.device(dev))
         policy.assign_distill_net(distill_net)
 
         print('Constructed Model:')

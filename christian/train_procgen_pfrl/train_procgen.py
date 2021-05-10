@@ -11,9 +11,10 @@ from vec_env import VecMonitor
 from vec_env import VecNormalize
 from util import logger
 
-from policies import ImpalaCNN
+from policies import ImpalaCNN, SmallCNN
 from ppo import PPO
-
+import tensorflow as tf
+import datetime
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -50,6 +51,11 @@ def parse_args():
 
     # Other parameters
     parser.add_argument('--nobg', type=lambda x : x.lower() != 'false', default=True)
+    parser.add_argument('--policy', type=str, choices=[
+        'impala', 'small'
+    ])
+    parser.add_argument('--max-layers', type=int, default=3)
+    parser.add_argument('--out-scale', type=float, default=1.0)
 
     return parser.parse_args()
 
@@ -103,6 +109,12 @@ def rollout_one_step(agent, env, obs, steps, env_max_steps=1000):
 
 
 def train(config, agent, train_env, test_env, model_dir):
+    
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    train_log_dir = model_dir + '/' + current_time + '/train'
+    test_log_dir = model_dir + '/' + current_time + '/test'
+    train_summary_writer = tf.summary.create_file_writer(train_log_dir)
+    test_summary_writer = tf.summary.create_file_writer(test_log_dir)
 
     if config.model_file is not None:
         agent.model.load_from_file(config.model_file)
@@ -176,6 +188,25 @@ def train(config, agent, train_env, test_env, model_dir):
             for stats in train_stats:
                 logger.logkv(stats[0], stats[1])
             logger.dumpkvs()
+            
+            with train_summary_writer.as_default():
+                tf.summary.scalar('eprewmean', 
+                                  safe_mean([info['r'] for info in train_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('eplenmean', 
+                                  safe_mean([info['l'] for info in train_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('total_steps', (step_cnt + 1) * config.num_envs, step=step_cnt+1)
+                tf.summary.scalar('fps', fps, step=step_cnt+1)
+                tf.summary.scalar('num_ppo_updates', num_ppo_updates, step=step_cnt+1)
+                train_stats = agent.get_statistics()
+                for stats in train_stats:
+                    logger.logkv(stats[0], stats[1])
+                    tf.summary.scalar(stats[0], stats[1], step=step_cnt+1)
+
+            with test_summary_writer.as_default():
+                tf.summary.scalar('eval_eprewmean', 
+                                  safe_mean([info['r'] for info in test_epinfo_buf]), step=step_cnt+1)
+                tf.summary.scalar('eval_eplenmean', 
+                                  safe_mean([info['l'] for info in test_epinfo_buf]), step=step_cnt+1)
 
             if num_ppo_updates % config.save_interval == 0:
                 model_path = os.path.join(
@@ -204,6 +235,15 @@ def run():
         configs.exp_name,
     )
     logger.configure(dir=log_dir, format_strs=['csv', 'stdout'])
+    
+    print()
+    print('configuring logger at dir', log_dir)
+    print('No background?', configs.nobg)
+    print('LR?', configs.lr)
+    print('Policy?', configs.policy)
+    print('Max Layers?', configs.max_layers)
+    print('Output channel scale?', configs.out_scale)
+    print()
 
     # Create venvs.
     train_venv = create_venv(configs, is_valid=False)
@@ -214,6 +254,22 @@ def run():
         obs_space=train_venv.observation_space,
         num_outputs=train_venv.action_space.n,
     )
+    
+    if configs.policy == 'small':
+        h, w, c = train_venv.observation_space.shape
+        policy = SmallCNN(
+            num_outputs=train_venv.action_space.n,
+            shape=(c, h, w),
+            mid_feats=256, 
+            max_layers=configs.max_layers,
+            out_scale=configs.out_scale,
+            build=True
+        )
+        
+        print()
+        print('Constructed Network')
+        print(policy)
+        print()
 
     # Create agent and train.
     optimizer = torch.optim.Adam(policy.parameters(), lr=configs.lr, eps=1e-5)

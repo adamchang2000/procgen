@@ -87,19 +87,47 @@ class SmallConvSequence(nn.Module):
 
 class SmallCNN(nn.Module):
     def __init__(self, num_outputs, mid_feats=256, T=0.5, alpha=0.5,
+                 build=False, gray=False, max_layers=3, shape=None,
+                 out_scale=1.0, first_channel=16, k_size=3, 
+                 alpha_sched=-1, kl_reduction='batchmean', 
                  cl_func=lambda x, y: 0):
+    
         super(SmallCNN, self).__init__()
         self.conv_seqs = nn.ModuleList()
         self.num_outputs = num_outputs
-        self.last_shape = None
+        self.last_shape = shape
         self.mid_feats = mid_feats
         self.T = T
+        self.max_layers = max_layers
         self.alpha = alpha
         self.cl_func = cl_func
+        self.gray = gray
+        self.out_scale = out_scale
+        self.kl_reduction = kl_reduction
+        self.alpha_sched = alpha_sched
+        
+        if build:
+            conv_seqs = []
+            for i, out_channels in enumerate([first_channel, 32, 32]):
+                if i == max_layers:
+                    break
+                out_channels = int(out_channels * out_scale)
+                small_conv = SmallConvSequence(shape, out_channels, k_size=k_size)
+                shape = self.last_shape = small_conv.get_output_shape()
+                conv_seqs.append(small_conv)
+            self.conv_seqs = nn.ModuleList(conv_seqs)
+            self.compile()
     
     def append(self, module, output_shape):
+        if len(self.conv_seqs) >= self.max_layers:
+            return
         self.conv_seqs.append(module)
         self.last_shape = output_shape
+    
+    def update_alpha(self, step_cnt):
+        if self.alpha_sched <= 0:
+            return
+        self.alpha = np.exp(-1 * step_cnt / self.alpha_sched)
 
     def compile(self):
         assert self.last_shape != None, "Haven't appended anything to modlist"
@@ -115,10 +143,19 @@ class SmallCNN(nn.Module):
     
     def forward(self, x, i=-1, normalize=True, permute=True):
         # print('Using small model forward')
+        dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = torch.device(dev)
+        x = x.to(device)
+
         if i != -1:
+            # Expect this section to be called when doing distillation
+            # in the parent forward_distillation function
             assert i < len(self.conv_seqs), f"Oob for passed in index: {i}"
             return self.conv_seqs[i](x)
         
+        if self.gray:
+            x = x.float()
+            x = x.mean(dim=-1).unsqueeze(-1)
         if normalize:
             x = x / 255.0
         if permute:
@@ -150,7 +187,8 @@ class ImpalaCNN(nn.Module):
     """Network from IMPALA paper, to work with pfrl."""
 
     def __init__(self, obs_space, num_outputs, first_channel=16, k_size=3,
-                 distill_net=None, corrs=[], no_perm=False, no_scale=False):
+                 distill_net=None, corrs=[], no_perm=False, 
+                 no_scale=False, distill_gray=False):
 
         # corrs array holds the indices of the conv sequences
         # that we will cache for passing to the distill_net
@@ -159,18 +197,35 @@ class ImpalaCNN(nn.Module):
         self.no_perm = no_perm
         self.no_scale = no_scale
         self.corrs = corrs
+        self.distill_gray = distill_gray
         h, w, c = obs_space.shape
         shape = (c, h, w)
 
         conv_seqs = []
-        for out_channels in [first_channel, 32, 32]:
+        for i, out_channels in enumerate([first_channel, 32, 32]):
             conv_seq = ConvSequence(shape, out_channels, k_size=k_size)
             
             # Building Student Network
             if distill_net:
+                output_shape = conv_seq.get_output_shape()
+                if distill_gray and i == 0:
+                    shape = list(shape)
+                    output_shape = list(output_shape)
+                    shape[0] = 1
+                    output_shape[0] = 1
+                    out_channels = 1
+                
+                if distill_net.out_scale != 1.0:
+                    if i != 0:
+                        shape = list(shape)
+                        shape[0] = int(shape[0] * distill_net.out_scale)
+                    output_shape = list(output_shape)
+                    output_shape[0] = int(output_shape[0] * distill_net.out_scale)
+                    out_channels = int(out_channels * distill_net.out_scale)
+                
                 distill_net.append(
-                  SmallConvSequence(shape, out_channels, k_size=k_size),
-                  conv_seq.get_output_shape()
+                    SmallConvSequence(shape, out_channels, k_size=k_size),
+                    output_shape
                 )
 
             shape = conv_seq.get_output_shape()
@@ -204,10 +259,19 @@ class ImpalaCNN(nn.Module):
         assert obs.ndim == 4,  f'Invalid Shape: {obs.shape}'
         if not self.no_scale:
             x = obs / 255.0  # scale to 0-1
-            x_dist = obs / 255.0
+            if self.distill_gray:
+                x_dist = obs.float()
+                x_dist = x_dist.mean(dim=-1).unsqueeze(-1)
+                x_dist = x_dist / 255.0
+            else:
+                x_dist = obs / 255.0
         else:
             x = obs
-            x_dist = obs * 1
+            if self.distill_gray:
+                x_dist = obs.float()
+                x_dist = x_dist.mean(dim=-1).unsqueeze(-1)
+            else:
+                x_dist = obs * 1
 
         if not self.no_perm:
             x = x.permute(0, 3, 1, 2)  # NHWC => NCHW
@@ -218,18 +282,19 @@ class ImpalaCNN(nn.Module):
             with torch.no_grad():
                 x = conv_seq(x)
             
-            x_dist = distill_net(x_dist, i=i)
+            if i < len(distill_net.conv_seqs):
+                x_dist = distill_net(x_dist, i=i)
             if len(self.corrs) != 0 and i in self.corrs:
                 corr_loss += cl_func(x_dist, x)
         
         with torch.no_grad():
-          x = torch.flatten(x, start_dim=1)
-          x = torch.relu(x)
-          x = self.hidden_fc(x)
-          x = torch.relu(x)
-          logits = self.logits_fc(x)
-          dist = torch.distributions.Categorical(logits=logits)
-          value = self.value_fc(x)
+            x = torch.flatten(x, start_dim=1)
+            x = torch.relu(x)
+            x = self.hidden_fc(x)
+            x = torch.relu(x)
+            logits = self.logits_fc(x)
+            dist = torch.distributions.Categorical(logits=logits)
+            value = self.value_fc(x)
 
         x_dist = torch.flatten(x_dist, start_dim=1)
         x_dist = torch.relu(x_dist)

@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-def loss_fn_kd(outputs, teacher_outputs, T):
+def loss_fn_kd(outputs, teacher_outputs, T, reduction):
     """
     Credit:
     https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
@@ -14,7 +14,7 @@ def loss_fn_kd(outputs, teacher_outputs, T):
     NOTE: the KL Divergence for PyTorch comparing the softmaxs of teacher
     and student expects the input tensor to be log probabilities! See Issue #2
     """
-    return nn.KLDivLoss()(
+    return nn.KLDivLoss(reduction=reduction)(
         F.log_softmax(outputs/T, dim=1), 
         F.softmax(teacher_outputs/T, dim=1))
 
@@ -28,6 +28,7 @@ class PPO_Distill(PPO):
         super().__init__(*args, **kwargs)
         self.model = self.teacher_model.distill_net
         self.kl_record = collections.deque(maxlen=100)
+        self.total_loss_record = collections.deque(maxlen=100)
 
     def _update(self, dataset):
         """Update both the policy and the value function."""
@@ -62,7 +63,8 @@ class PPO_Distill(PPO):
             # EDIT Distill: Edited to forward_distill
             # def forward_distill(self, obs, cl_func, kl_func)
             # --> dist, value, dist_dist, value_dist, corr_loss, kl_loss
-            kl_func = lambda x, y: loss_fn_kd(x, y, self.model.T)
+            kl_func = lambda x, y: loss_fn_kd(
+                x, y, self.model.T, self.model.kl_reduction)
             cl_func = self.model.cl_func
             alpha= self.model.alpha
             _, _, distribs, vs_pred, corr_loss, kl_loss =\
@@ -90,7 +92,7 @@ class PPO_Distill(PPO):
             self.model.zero_grad()
             # EDIT Distill: Uses alpha for distillation weight and 
             # corr_loss (if specified) and kl_loss
-            loss = alpha * self._lossfun(
+            loss = (1.0 - (alpha if alpha >= 0 else 0)) * self._lossfun(
                 distribs.entropy(),
                 vs_pred,
                 distribs.log_prob(actions),
@@ -98,8 +100,11 @@ class PPO_Distill(PPO):
                 log_probs_old=log_probs_old,
                 advs=advs,
                 vs_teacher=vs_teacher,
-            ) + (1.0 - alpha) * (corr_loss + kl_loss)
+            ) + (alpha if alpha >= 0 else 0) * (
+                corr_loss + kl_loss
+            )
             self.kl_record.append(kl_loss.item())
+            self.total_loss_record.append(loss.item())
 
             loss.backward()
             if self.max_grad_norm is not None:
@@ -116,6 +121,8 @@ class PPO_Distill(PPO):
             ("average_value_loss", _mean_or_nan(self.value_loss_record)),
             ("average_policy_loss", _mean_or_nan(self.policy_loss_record)),
             ("average_kl_loss", _mean_or_nan(self.kl_record)),
+            ("average_total_loss", _mean_or_nan(self.total_loss_record)),
             ("n_updates", self.n_updates),
+            ("alpha", self.model.alpha),
             ("explained_variance", self.explained_variance),
         ]

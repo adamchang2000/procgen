@@ -6,3 +6,4 @@ torchvision
 matplotlib
 tqdm
 pandas
+opencv-python
