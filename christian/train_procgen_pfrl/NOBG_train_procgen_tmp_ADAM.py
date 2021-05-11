@@ -91,6 +91,7 @@ def parse_args():
     parser.add_argument('--reduction', type=str, choices=[
         'mean', 'batchmean'
     ])
+    parser.add_argument('--distill-T-sq', type=get_bool, default=True)
 
     return parser.parse_args()
 
@@ -285,6 +286,7 @@ def run():
         print('Output Channel Scale?', configs.out_scale)
         print('Reduction?', configs.reduction)
         print('Alpha Scheduler?', configs.distill_asched)
+        print('Use T^2?', configs.distill_T_sq)
     else:
         print('Using template initialization...')
         print('TMPNet version?', configs.TMPv)
@@ -323,7 +325,8 @@ def run():
             gray=configs.distill_gray,
             out_scale=configs.out_scale,
             kl_reduction=configs.reduction,
-            alpha_sched=configs.distill_asched
+            alpha_sched=configs.distill_asched,
+            T_sq=configs.distill_T_sq
         )
         
         policy = ImpalaCNN(

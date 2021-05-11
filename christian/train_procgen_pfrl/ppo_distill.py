@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-def loss_fn_kd(outputs, teacher_outputs, T, reduction):
+def loss_fn_kd(outputs, teacher_outputs, T, reduction, T_sq):
     """
     Credit:
     https://github.com/peterliht/knowledge-distillation-pytorch/blob/master/model/net.py
@@ -16,7 +16,9 @@ def loss_fn_kd(outputs, teacher_outputs, T, reduction):
     """
     return nn.KLDivLoss(reduction=reduction)(
         F.log_softmax(outputs/T, dim=1), 
-        F.softmax(teacher_outputs/T, dim=1))
+        F.softmax(teacher_outputs/T, dim=1))  * (
+        T * T if T_sq else 1.0
+    )
 
 class PPO_Distill(PPO):
     saved_attributes = ("model", "optimizer", "obs_normalizer")
@@ -64,7 +66,7 @@ class PPO_Distill(PPO):
             # def forward_distill(self, obs, cl_func, kl_func)
             # --> dist, value, dist_dist, value_dist, corr_loss, kl_loss
             kl_func = lambda x, y: loss_fn_kd(
-                x, y, self.model.T, self.model.kl_reduction)
+                x, y, self.model.T, self.model.kl_reduction, self.model.T_sq)
             cl_func = self.model.cl_func
             alpha= self.model.alpha
             _, _, distribs, vs_pred, corr_loss, kl_loss =\

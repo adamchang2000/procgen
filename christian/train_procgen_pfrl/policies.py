@@ -90,7 +90,7 @@ class SmallCNN(nn.Module):
                  build=False, gray=False, max_layers=3, shape=None,
                  out_scale=1.0, first_channel=16, k_size=3, 
                  alpha_sched=-1, kl_reduction='batchmean', 
-                 cl_func=lambda x, y: 0):
+                 T_sq=True, cl_func=lambda x, y: 0):
     
         super(SmallCNN, self).__init__()
         self.conv_seqs = nn.ModuleList()
@@ -98,6 +98,7 @@ class SmallCNN(nn.Module):
         self.last_shape = shape
         self.mid_feats = mid_feats
         self.T = T
+        self.T_sq = T_sq
         self.max_layers = max_layers
         self.alpha = alpha
         self.cl_func = cl_func
