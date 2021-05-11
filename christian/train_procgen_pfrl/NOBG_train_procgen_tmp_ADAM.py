@@ -77,7 +77,7 @@ def parse_args():
 
     # Distill parameters.
     parser.add_argument('--distill', type=get_bool, default=False)
-    parser.add_argument('--distill-T', type=float, default=0.5)
+    parser.add_argument('--distill-T', type=float, default=1.0)
     parser.add_argument('--distill-alpha', type=float, default=0.5)
     parser.add_argument('--distill-asched', type=float, default=-1)
     parser.add_argument('--distill-cl-func', type=str, choices=[

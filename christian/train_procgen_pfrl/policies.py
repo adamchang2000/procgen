@@ -86,7 +86,7 @@ class SmallConvSequence(nn.Module):
 
 
 class SmallCNN(nn.Module):
-    def __init__(self, num_outputs, mid_feats=256, T=0.5, alpha=0.5,
+    def __init__(self, num_outputs, mid_feats=256, T=1.0, alpha=0.5,
                  build=False, gray=False, max_layers=3, shape=None,
                  out_scale=1.0, first_channel=16, k_size=3, 
                  alpha_sched=-1, kl_reduction='batchmean', 
